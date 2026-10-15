@@ -2287,8 +2287,13 @@ if _IN_BROWSER:
     }
   }
   let currentOut = null;
-  window.__pyOut = function (text, kind) { if (!currentOut) return; appendText(currentOut, text, kind); };
-  window.__pltShow = function (json) { if (!currentOut) return; try { renderChart(JSON.parse(json), currentOut); } catch (e) { appendText(currentOut, '[차트 표시 오류] ' + e.message + '\n', 'err'); } };
+  const pending = [];   // currentOut 이 없을 때 도착한 출력(타이밍 문제 대비)
+  window.__pyHookCalls = 0;
+  window.__pyOut = function (text, kind) { window.__pyHookCalls++; if (!currentOut) { pending.push(['out', String(text), kind]); return; } appendText(currentOut, String(text), kind); };
+  window.__pltShow = function (json) { window.__pyHookCalls++; if (!currentOut) { pending.push(['plt', String(json)]); return; } try { renderChart(JSON.parse(json), currentOut); } catch (e) { appendText(currentOut, '[차트 표시 오류] ' + e.message + '\n', 'err'); } };
+  function flushPending(out) {
+    while (pending.length) { const p = pending.shift(); if (p[0] === 'out') appendText(out, p[1], p[2]); else { try { renderChart(JSON.parse(p[1]), out); } catch (e) { /* 무시 */ } } }
+  }
   window.__pyFileSaved = function (name) { py.userFiles[name] = true; };
 
   function bootPython() {
@@ -2461,8 +2466,12 @@ if _IN_BROWSER:
         out.replaceChildren();
         currentOut = out;
         let status = 'error';
-        try { status = window.pyRuntime.run(ta.value, stdinTa.value); }
+        const before = window.__pyHookCalls;
+        try { status = String(window.pyRuntime.run(ta.value, stdinTa.value)); }
         catch (e) { appendText(out, '[실행기 오류] ' + (e && e.message ? e.message : e) + '\n', 'err'); }
+        flushPending(out);
+        if (!out.childElementCount) appendText(out, window.__pyHookCalls === before ? '(출력 없음 — 엔진이 출력을 전달하지 않았습니다. F12 콘솔의 메시지를 확인하세요)' : '(출력 없음)', window.__pyHookCalls === before ? 'err' : '');
+        if (window.__pyHookCalls === before) console.warn('[실습실] 실행 후 출력 훅이 호출되지 않음', { status, code: ta.value.slice(0, 80) });
         currentOut = null;
         runBtn.disabled = false;
         if (onResult) onResult({ status, output: out.innerText.trim(), code: ta.value, charts: out.querySelectorAll('.chart').length });
