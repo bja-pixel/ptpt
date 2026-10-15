@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    // ── 교수자 이메일 목록 (firebase-config.js 의 teacherEmails 와 같게 유지) ──
+    function teacher() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() in ['iseri2022@gmail.com'];
+    }
+    function rosterOf(sid) { return get(/databases/$(db)/documents/roster/$(sid)); }
+    function inRoster(sid) { return exists(/databases/$(db)/documents/roster/$(sid)); }
+    function myLink() { return get(/databases/$(db)/documents/links/$(request.auth.uid)); }
+    function linkedTo(sid) {
+      return request.auth != null
+        && exists(/databases/$(db)/documents/links/$(request.auth.uid))
+        && myLink().data.sid == sid
+        && inRoster(sid);
+    }
+
+    // 명단: 교수자만 관리. 학생은 자기 학번 문서만 읽기(이름 표시용)
+    match /roster/{sid} {
+      allow read: if teacher() || linkedTo(sid);
+      allow write: if teacher();
+    }
+
+    // 기기(익명 계정) ↔ 학번 연결: 명단의 접속 코드가 맞을 때만 생성·갱신
+    match /links/{uid} {
+      allow read: if teacher() || (request.auth != null && request.auth.uid == uid);
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.sid is string
+        && request.resource.data.code is string
+        && inRoster(request.resource.data.sid)
+        && rosterOf(request.resource.data.sid).data.code == request.resource.data.code;
+      allow delete: if teacher() || (request.auth != null && request.auth.uid == uid);
+    }
+
+    // 학생 기록: 본인(연결된 학번)과 교수자만
+    match /submissions/{sid} {
+      allow read, write: if teacher() || linkedTo(sid);
+      match /modules/{mid} {
+        allow read, write: if teacher() || linkedTo(sid);
+      }
+    }
+  }
+}
