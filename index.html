@@ -77,6 +77,11 @@ code, pre, textarea.code { font-family: var(--mono); }
 .nav-item .prog { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--border); }
 .nav-item .prog.half { background: linear-gradient(90deg, var(--ok) 50%, transparent 50%); border-color: var(--ok); }
 .nav-item .prog.done { background: var(--ok); border-color: var(--ok); }
+.nav-item.locked .t, .nav-item.locked .wk { color: var(--muted); opacity: 0.7; }
+.nav-item .lock { font-size: 11px; }
+.mod-card.locked { opacity: 0.6; background: var(--surface-2); }
+.sched-table td { vertical-align: middle; }
+.sched-table select, .sched-table input { font-size: 13px; }
 .nav-home { margin-bottom: 10px; }
 
 main { min-width: 0; }
@@ -1897,6 +1902,25 @@ if _IN_BROWSER:
   const CFG = window.LAB_CONFIG || null;
   const cloud = { db: null, auth: null, user: null, uid: null, sid: '', enabled: false, isOwner: false, authed: false, loaded: false, timers: {}, rosterEntry: null, configured: !!(CFG && CFG.firebase && CFG.firebase.apiKey && !/YOUR_/.test(CFG.firebase.apiKey)) };
   const cloudEl = $('#cloud-status');
+  // ───────── 주차 오픈 일정 (settings/schedule, 교수자가 관리) ─────────
+  cloud.schedule = {};
+  async function loadSchedule() {
+    try { const d = await cloud.db.doc('settings/schedule').get(); cloud.schedule = (d.exists && d.data().weeks) || {}; }
+    catch (e) { cloud.schedule = {}; console.warn('일정 읽기 실패(모두 열림으로 처리)', e); }
+  }
+  // 반환: { open: bool, mode: 'open'|'closed'|'at', openAt: ISO|null, label }
+  function weekStatus(m, asStudent) {
+    const w = cloud.schedule[m.id] || { mode: 'open' };
+    if (cloud.isOwner && !asStudent) return { open: true, mode: w.mode || 'open', openAt: w.openAt || null, label: '' };
+    if (w.mode === 'closed') return { open: false, mode: 'closed', openAt: null, label: '아직 열리지 않음' };
+    if (w.mode === 'at' && w.openAt) {
+      const t = new Date(w.openAt).getTime();
+      if (Date.now() < t) return { open: false, mode: 'at', openAt: w.openAt, label: fmtOpenAt(w.openAt) + ' 오픈' };
+    }
+    return { open: true, mode: w.mode || 'open', openAt: w.openAt || null, label: '' };
+  }
+  function fmtOpenAt(iso) { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+  function weekIsOpen(m) { return weekStatus(m).open; }
   function setCloud(kind, text, title) { cloudEl.className = 'pill ' + kind; $('.txt', cloudEl).textContent = text; if (title) cloudEl.title = title; }
   const WEEK_IDS = COURSE.map(m => m.id);
   const normSid = v => String(v || '').replace(/\s+/g, '').trim();
@@ -1994,6 +2018,7 @@ if _IN_BROWSER:
         cloud.isOwner = true; cloud.authed = true; cloud.enabled = false;
         $('#nav-teacher').classList.remove('hidden'); $('#nav-answers').classList.remove('hidden');
         setCloud('ready', '교수자 로그인', user.email);
+        await loadSchedule();
         renderStudentHeader();
         const id = (location.hash || '').replace('#', '');
         go(COURSE.some(m => m.id === id) ? id : 'teacher');
@@ -2010,6 +2035,7 @@ if _IN_BROWSER:
         cloud.authed = true; cloud.enabled = true;
         setCloud('', '기록 불러오는 중…');
         await loadStudentData();
+        await loadSchedule();
         setCloud('ready', '서버에 저장됨', '과제·퀴즈·성찰 기록이 서버에 저장됩니다. 어느 기기에서 접속해도 이어집니다.');
         renderStudentHeader();
         const id = (location.hash || '').replace('#', '');
@@ -2217,6 +2243,9 @@ if _IN_BROWSER:
         countNote, rmsg),
       roster.length ? h('div', { style: 'margin-top:10px' }, h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px' }, h('b', { style: 'font-size:13px' }, '접속 코드 목록'), h('button', { class: 'btn small', type: 'button', onclick: () => downloadFile('접속코드_명단.csv', '﻿이름,학번,접속코드\n' + roster.map(e => `${e.name},${e.sid},${e.code || ''}`).join('\n') + '\n', rmsg, card) }, 'CSV 내려받기')), h('div', { style: 'overflow-x:auto;max-height:320px;overflow-y:auto' }, codeTable)) : null);
     card.append(rosterBox);
+    const schedBox = renderSchedulePanel(); schedBox.removeAttribute('open'); schedBox.style.margin = '0 0 14px';
+    schedBox.querySelector('summary').textContent = `주차 오픈 관리 (열림 ${COURSE.filter(m => weekStatus(m, true).open).length}/${COURSE.length}주차)`;
+    card.append(schedBox);
 
     // 현황 표
     const rows = roster.map(e => ({ name: e.name, sid: e.sid, data: subs[e.sid] || null }));
@@ -2571,10 +2600,10 @@ if _IN_BROWSER:
     navList.replaceChildren();
     const box = h('div', { class: 'nav-group' });
     for (const m of COURSE) {
-      const pr = moduleProgress(m);
-      box.append(h('button', { class: 'nav-item' + (m.id === activeId ? ' active' : ''), type: 'button', onclick: () => go(m.id) },
-        h('span', { class: 'wk' }, `W${String(m.week).padStart(2, '0')}`), h('span', { class: 't', title: m.title }, m.title),
-        h('span', { class: 'prog ' + (pr.pct === 100 ? 'done' : pr.pct > 0 ? 'half' : '') })));
+      const pr = moduleProgress(m); const ws = weekStatus(m);
+      box.append(h('button', { class: 'nav-item' + (m.id === activeId ? ' active' : '') + (ws.open ? '' : ' locked'), type: 'button', onclick: () => go(m.id), title: ws.open ? m.title : (m.title + ' — ' + ws.label) },
+        h('span', { class: 'wk' }, `W${String(m.week).padStart(2, '0')}`), h('span', { class: 't' }, m.title),
+        ws.open ? (cloud.isOwner && !weekStatus(m, true).open ? h('span', { class: 'lock', title: '학생에게는 잠김: ' + weekStatus(m, true).label }, '🔒') : h('span', { class: 'prog ' + (pr.pct === 100 ? 'done' : pr.pct > 0 ? 'half' : '') })) : h('span', { class: 'lock', title: ws.label }, '🔒')));
     }
     navList.append(box);
     $('#nav-home').classList.toggle('active', activeId === 'home');
@@ -2587,7 +2616,7 @@ if _IN_BROWSER:
     renderNav(id);
     $('#nav-teacher').classList.toggle('active', id === 'teacher');
     $('#nav-answers').classList.toggle('active', id === 'answers');
-    if (id === 'home') renderHome(); else if (id === 'teacher') renderTeacher(); else if (id === 'answers') renderAnswers(tab); else renderModule(COURSE.find(m => m.id === id), tab);
+    if (id === 'home') renderHome(); else if (id === 'teacher') renderTeacher(); else if (id === 'answers') renderAnswers(tab); else { const m = COURSE.find(x => x.id === id); if (weekIsOpen(m)) renderModule(m, tab); else renderLocked(m); }
     window.scrollTo({ top: 0 });
   }
   $('#nav-teacher').addEventListener('click', () => go('teacher'));
@@ -2613,9 +2642,10 @@ if _IN_BROWSER:
       const ms = mstate(m.id);
       const quizTxt = ms.quiz ? `퀴즈 ${ms.quiz.score}/${ms.quiz.total}` : '퀴즈 미응시';
       const taskTxt = `과제 ${m.tasks.filter(t => ms.tasks[t.id] && ms.tasks[t.id].ran).length}/${m.tasks.length}`;
-      grid.append(h('button', { class: 'mod-card', type: 'button', onclick: () => go(m.id) },
-        h('span', { class: 'wk' }, `${m.week}주차 · ${m.group}`), h('span', { class: 't' }, m.title),
-        h('span', { class: 's' }, `${taskTxt} · ${quizTxt}`), h('span', { class: 'bar' }, h('i', { style: `width:${pr.pct}%` }))));
+      const ws = weekStatus(m);
+      grid.append(h('button', { class: 'mod-card' + (ws.open ? '' : ' locked'), type: 'button', onclick: () => go(m.id) },
+        h('span', { class: 'wk' }, `${m.week}주차 · ${m.group}` + (ws.open ? '' : ' · 🔒')), h('span', { class: 't' }, m.title),
+        h('span', { class: 's' }, ws.open ? `${taskTxt} · ${quizTxt}` : ws.label), h('span', { class: 'bar' }, h('i', { style: `width:${ws.open ? pr.pct : 0}%` }))));
     }
     const overall = h('div', { class: 'card' },
       h('div', { class: 'task-head' }, h('h3', null, '주차별 진행'), h('span', { class: 'badge ' + (totalDone === totalAll ? 'pass' : totalDone ? 'ran' : 'todo') }, `${totalDone} / ${totalAll} 항목 완료`)),
@@ -2700,6 +2730,66 @@ if _IN_BROWSER:
     });
     fb.replaceChildren(h('div', { style: 'display:flex;gap:8px;align-items:center;margin-bottom:6px' }, h('span', { class: 'inline-note' }, filename), copyBtn), ta);
     return false;
+  }
+
+  // ───────── 잠긴 주차 화면 ─────────
+  function renderLocked(m) {
+    const main = $('#main'); main.replaceChildren();
+    const ws = weekStatus(m);
+    main.append(h('div', { class: 'card module-head' },
+      h('div', { class: 'eyebrow' }, `WEEK ${String(m.week).padStart(2, '0')} · ${m.group}`),
+      h('h2', null, '🔒 ' + m.title), h('div', { class: 'subtitle' }, m.subtitle)),
+      h('div', { class: 'card' }, h('h3', null, '아직 열리지 않은 주차입니다'),
+        h('p', null, ws.mode === 'at' ? `이 주차는 ${new Date(ws.openAt).toLocaleString('ko-KR')} 에 열립니다. 그때 다시 접속하거나 새로고침하세요.` : '교수자가 열어 주면 접속할 수 있습니다.'),
+        h('div', { style: 'margin-top:10px' }, h('button', { class: 'btn', type: 'button', onclick: async () => { await loadSchedule(); go(m.id); } }, '다시 확인'), ' ', h('button', { class: 'btn ghost', type: 'button', onclick: () => go('home') }, '학습 현황으로'))));
+  }
+
+  // ───────── 교수자: 주차 오픈 관리 ─────────
+  function renderSchedulePanel() {
+    const wrap = h('div', { class: 'card' });
+    const msg = h('div', { class: 'msg muted' });
+    wrap.append(h('div', { class: 'task-head' }, h('h3', null, '주차 오픈 관리'), h('span', { class: 'inline-note' }, '학생에게 보이는 주차를 정합니다. 교수자는 항상 모든 주차를 볼 수 있습니다.')));
+    const local = {}; COURSE.forEach(m => { local[m.id] = Object.assign({ mode: 'open', openAt: null }, cloud.schedule[m.id] || {}); });
+    const toLocalInput = iso => { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
+    const table = h('table', { class: 'files-table sched-table' }, h('thead', null, h('tr', null, h('th', null, '주차'), h('th', null, '상태'), h('th', null, '예약 오픈 시각'), h('th', null, '학생 화면'))));
+    const tb = h('tbody');
+    const rows = {};
+    const refreshRow = id => { const r = rows[id]; const w = local[id]; const open = w.mode === 'open' || (w.mode === 'at' && w.openAt && Date.now() >= new Date(w.openAt).getTime()); r.state.className = 'badge ' + (open ? 'pass' : w.mode === 'at' ? 'ran' : 'todo'); r.state.textContent = open ? '열림' : w.mode === 'at' ? '예약 (' + fmtOpenAt(w.openAt) + ')' : '잠김'; r.dt.disabled = w.mode !== 'at'; };
+    COURSE.forEach(m => {
+      const w = local[m.id];
+      const sel = h('select', { style: 'padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg)' },
+        h('option', { value: 'open' }, '바로 열림'), h('option', { value: 'at' }, '예약 시각에 열림'), h('option', { value: 'closed' }, '잠금'));
+      sel.value = w.mode;
+      const dt = h('input', { type: 'datetime-local', style: 'padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg)' });
+      dt.value = toLocalInput(w.openAt);
+      const state = h('span', { class: 'badge todo' });
+      sel.addEventListener('change', () => { w.mode = sel.value; if (w.mode === 'at' && !dt.value) { const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(9, 0, 0, 0); dt.value = toLocalInput(d.toISOString()); w.openAt = d.toISOString(); } refreshRow(m.id); });
+      dt.addEventListener('change', () => { w.openAt = dt.value ? new Date(dt.value).toISOString() : null; refreshRow(m.id); });
+      rows[m.id] = { sel, dt, state };
+      tb.append(h('tr', null, h('td', null, h('b', null, `W${String(m.week).padStart(2, '0')}`), ' ', h('span', { class: 'inline-note' }, m.title)), h('td', null, sel), h('td', null, dt), h('td', null, state)));
+      refreshRow(m.id);
+    });
+    table.append(tb);
+    const setAll = (mode) => { COURSE.forEach(m => { local[m.id].mode = mode; rows[m.id].sel.value = mode; refreshRow(m.id); }); };
+    const openUpTo = h('select', { style: 'padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg)' }, COURSE.map(m => h('option', { value: m.id }, `W${String(m.week).padStart(2, '0')}까지`)));
+    const btns = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0' },
+      h('button', { class: 'btn small', type: 'button', onclick: () => setAll('open') }, '모두 열기'),
+      h('button', { class: 'btn small', type: 'button', onclick: () => setAll('closed') }, '모두 잠금'),
+      h('span', { class: 'inline-note' }, '|'), openUpTo,
+      h('button', { class: 'btn small', type: 'button', onclick: () => { let passed = false; COURSE.forEach(m => { local[m.id].mode = passed ? 'closed' : 'open'; rows[m.id].sel.value = local[m.id].mode; refreshRow(m.id); if (m.id === openUpTo.value) passed = true; }); } }, '여기까지 열고 나머지 잠금'),
+      h('button', { class: 'btn small', type: 'button', onclick: () => {
+        // 선택한 주차부터 매주 같은 요일·시각에 차례로 예약
+        const start = rows[openUpTo.value].dt.value || toLocalInput(new Date().toISOString()); let base = new Date(start); let n = 0; let after = false;
+        COURSE.forEach(m => { if (m.id === openUpTo.value) after = true; if (!after) return; const d = new Date(base.getTime() + n * 7 * 86400000); local[m.id].mode = 'at'; local[m.id].openAt = d.toISOString(); rows[m.id].sel.value = 'at'; rows[m.id].dt.value = toLocalInput(d.toISOString()); refreshRow(m.id); n++; });
+      } }, '이 주차부터 매주 자동 예약'));
+    const saveBtn = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+      msg.className = 'msg muted'; msg.textContent = '저장 중…';
+      const weeks = {}; COURSE.forEach(m => { const w = local[m.id]; weeks[m.id] = { mode: w.mode, openAt: w.mode === 'at' ? (w.openAt || null) : null }; });
+      try { await cloud.db.doc('settings/schedule').set({ weeks, updatedAt: new Date().toISOString(), by: cloud.user && cloud.user.email || '' }); cloud.schedule = weeks; renderNav('teacher'); const sm = wrap.parentElement && wrap.parentElement.querySelector('summary'); if (sm) sm.textContent = `주차 오픈 관리 (열림 ${COURSE.filter(m => weekStatus(m, true).open).length}/${COURSE.length}주차)`; msg.className = 'msg ok'; msg.textContent = `저장되었습니다 (${new Date().toLocaleString('ko-KR')}). 학생은 새로고침하면 반영됩니다.`; }
+      catch (e) { msg.className = 'msg err'; msg.textContent = '저장 실패: ' + (e.message || e.code) + ' — firestore.rules 에 settings 규칙이 있는지 확인하세요.'; }
+    } }, '오픈 일정 저장');
+    wrap.append(h('p', { class: 'inline-note' }, '"예약 시각에 열림"은 학생 기기의 시계 기준이며, 그 시각이 지나면 자동으로 열립니다. 잠긴 주차는 학생 목록에 🔒로 표시되고 들어갈 수 없습니다. "매주 자동 예약"은 선택한 주차의 예약 시각(비어 있으면 지금)부터 7일 간격으로 이후 주차를 채웁니다.'), btns, table, h('div', { style: 'margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, saveBtn, msg));
+    return h('details', { class: 'hints', open: 'open' }, h('summary', null, '주차 오픈 관리'), wrap);
   }
 
   // ───────── 모듈 화면 ─────────
