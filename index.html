@@ -1956,15 +1956,23 @@ if _IN_BROWSER:
     try { await ref.set(data, { merge: true }); setCloud('ready', '서버에 저장됨', '과제·퀴즈·성찰 기록이 서버에 저장됩니다. 어느 기기에서 접속해도 이어집니다.'); return true; }
     catch (e) { cloudFail(e); return false; }
   }
+  // 자동 저장: 마지막 변경 후 SAVE_DELAY 뒤에 한 번만 서버에 씀(무료 요금제 쓰기 한도 절약). 탭을 숨기거나 닫을 때는 즉시 저장.
+  const SAVE_DELAY = 3000;
+  async function flushModule(id) {
+    clearTimeout(cloud.timers[id]); delete cloud.timers[id];
+    setCloud('', '저장 중…');
+    const ok = await cloudWriteDoc(cloud.db.doc('submissions/' + cloud.sid + '/modules/' + id), moduleDoc(id));
+    if (ok) await cloudSaveProfile(id);
+  }
   function cloudSaveModule(id) {
     if (!cloud.enabled) return;
     clearTimeout(cloud.timers[id]);
-    cloud.timers[id] = setTimeout(async () => {
-      setCloud('', '저장 중…');
-      const ok = await cloudWriteDoc(cloud.db.doc('submissions/' + cloud.sid + '/modules/' + id), moduleDoc(id));
-      if (ok) await cloudSaveProfile(id);
-    }, 900);
+    setCloud('', '변경됨 · 곧 저장', '마지막 입력 후 몇 초 뒤 서버에 저장됩니다.');
+    cloud.timers[id] = setTimeout(() => flushModule(id), SAVE_DELAY);
   }
+  function flushAllPending() { Object.keys(cloud.timers).forEach(id => { if (cloud.timers[id]) flushModule(id); }); }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushAllPending(); });
+  window.addEventListener('pagehide', flushAllPending);
   async function cloudSaveProfile(changedId) {
     if (!cloud.enabled) return;
     const weeks = {};
@@ -3043,6 +3051,7 @@ if _IN_BROWSER:
       btnRow.append(h('button', { class: 'btn primary', type: 'button', onclick: async () => {
         msg.className = 'msg muted'; msg.textContent = '제출 중…';
         ms.submittedAt = new Date().toISOString(); ms.updatedAt = ms.submittedAt; save();
+        clearTimeout(cloud.timers[m.id]); delete cloud.timers[m.id];
         const ok = await cloudWriteDoc(cloud.db.doc('submissions/' + cloud.sid + '/modules/' + m.id), moduleDoc(m.id));
         if (ok) { await cloudSaveProfile(m.id); msg.className = 'msg ok'; msg.textContent = `제출되었습니다 (${new Date(ms.submittedAt).toLocaleString('ko-KR')}). 이후 수정하고 다시 제출할 수도 있습니다.`; }
         else { msg.className = 'msg err'; msg.textContent = '서버 제출에 실패했습니다. 잠시 후 다시 시도하거나 제출 파일을 내려받아 보관하세요.'; }
