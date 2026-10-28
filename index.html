@@ -65,6 +65,8 @@ code, pre, textarea.code { font-family: var(--mono); }
 /* 본문 그리드 */
 .shell { max-width: 1280px; margin: 0 auto; display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 20px;
   padding-block: 18px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.shell.nav-hidden { grid-template-columns: minmax(0, 1fr); }
+.shell.nav-hidden .sidebar { display: none; }
 .sidebar { position: sticky; top: 78px; align-self: start; max-height: calc(100vh - 100px); overflow: auto; }
 .nav-group { margin-bottom: 14px; }
 .nav-group .gh { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; padding: 0 10px 4px; }
@@ -245,6 +247,7 @@ main { min-width: 0; }
       <span class="sub">프로그래밍교수학습 · PRIMM 실습 13주</span>
     </div>
     <div class="student">
+      <button class="btn small ghost hidden" type="button" id="nav-toggle" title="왼쪽 학습 현황 메뉴를 숨기거나 보입니다">◀ 메뉴 숨기기</button>
       <input id="st-name" type="hidden"><input id="st-org" type="hidden">
       <span id="st-chip" class="pill hidden"><span class="txt"></span><button class="btn small ghost" type="button" id="st-change" style="padding:0 4px">로그아웃</button></span>
       <span id="py-status" class="pill"><span class="dot"></span><span class="txt">Python 준비 중…</span></span>
@@ -1982,8 +1985,22 @@ if _IN_BROWSER:
   }
   function cloudSaveProfileDebounced() { /* 이름·학번은 명단에서 오므로 별도 저장 없음 */ }
   function needsVerify() { return false; }
+  // ───────── 왼쪽 메뉴 숨기기/보이기 ─────────
+  const navToggle = $('#nav-toggle');
+  function applyNavHidden() {
+    let hidden = false; try { hidden = localStorage.getItem('pel-nav-hidden') === '1'; } catch (e) { /* 무시 */ }
+    $('.shell').classList.toggle('nav-hidden', hidden);
+    navToggle.textContent = hidden ? '▶ 메뉴 보이기' : '◀ 메뉴 숨기기';
+  }
+  navToggle.addEventListener('click', () => {
+    const hidden = !$('.shell').classList.contains('nav-hidden');
+    try { localStorage.setItem('pel-nav-hidden', hidden ? '1' : '0'); } catch (e) { /* 무시 */ }
+    applyNavHidden();
+  });
+  applyNavHidden();
   function renderStudentHeader() {
     const chip = $('#st-chip');
+    navToggle.classList.toggle('hidden', !cloud.authed);
     if (!cloud.authed) { chip.classList.add('hidden'); return; }
     chip.classList.remove('hidden'); chip.className = 'pill ready';
     $('.txt', chip).textContent = cloud.isOwner ? `교수자 · ${cloud.user.email || ''}` : `${state.name} · ${cloud.sid} ✓`;
