@@ -2453,7 +2453,7 @@ if _IN_BROWSER:
   }
 
   // ───────── 차트 (Chart.js) ─────────
-  const PALETTE = ['#2f6fd6', '#d9633b', '#2f9e63', '#8e5bd1', '#d4a800', '#1aa6b7', '#c23fa6', '#8a8a8a'];
+  const DEFAULT_PALETTE = ['#2f6fd6', '#d9633b', '#2f9e63', '#8e5bd1', '#d4a800', '#1aa6b7', '#c23fa6', '#8a8a8a'];
   const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   function withAlpha(color, a) {
     if (!color) return color;
@@ -2466,7 +2466,18 @@ if _IN_BROWSER:
     const wrap = h('div', { class: 'chart' });
     const canvas = h('canvas');
     wrap.append(canvas); out.append(wrap);
-    const fg = css('--fg'), muted = css('--muted'), grid = css('--border');
+    const fg = css('--fg'), muted = css('--muted');
+    // matplotlib 스타일 흉내: plt.style.use("ggplot") 등
+    const STYLES = {
+      ggplot: { bg: '#E5E5E5', grid: '#FFFFFF', palette: ['#E24A33', '#348ABD', '#988ED5', '#777777', '#FBC15E', '#8EBA42', '#FFB5B8'], alwaysGrid: true },
+      seaborn: { bg: '#EAEAF2', grid: '#FFFFFF', palette: ['#4C72B0', '#DD8452', '#55A868', '#C44E52', '#8172B3', '#937860', '#DA8BC3', '#8C8C8C'], alwaysGrid: true },
+      dark_background: { bg: '#000000', grid: '#444444', palette: ['#8dd3c7', '#feffb3', '#bfbbd9', '#fa8174', '#81b1d2', '#fdb462', '#b3de69'], alwaysGrid: false, fg: '#eeeeee' },
+      bmh: { bg: '#EEEEEE', grid: '#B0B0B0', palette: ['#348ABD', '#A60628', '#7A68A6', '#467821', '#D55E00', '#CC79A7', '#56B4E9'], alwaysGrid: true },
+    };
+    const styleName = String(p.style || 'default').replace(/^seaborn.*/, 'seaborn');
+    const st = STYLES[styleName] || null;
+    const PALETTE = (st && st.palette) || DEFAULT_PALETTE;
+    const grid = st ? st.grid : css('--border');
     const first = series[0];
     const type0 = first.type;
     const n = (first.x || []).length;
@@ -2532,7 +2543,7 @@ if _IN_BROWSER:
       scales: {},
     };
     if (chartType !== 'pie') {
-      const xs = { ticks: { color: muted, maxRotation: (p.xticks && p.xticks.rotation) || 50, autoSkip: true, maxTicksLimit: 30 }, grid: { color: p.grid ? grid : 'transparent' }, title: { display: !!p.xlabel, text: p.xlabel, color: muted } };
+      const xs = { ticks: { color: muted, maxRotation: (p.xticks && p.xticks.rotation) || 50, autoSkip: true, maxTicksLimit: 30 }, grid: { color: (p.grid || (st && st.alwaysGrid)) ? grid : 'transparent' }, title: { display: !!p.xlabel, text: p.xlabel, color: muted } };
       const ys = { ticks: { color: muted, callback: v => (p.rcParams && p.rcParams.unicode_minus === false) ? String(v) : (typeof v === 'number' ? v.toLocaleString() : v) }, grid: { color: grid }, title: { display: !!p.ylabel, text: p.ylabel, color: muted } };
       if (indexAxis === 'y') { xs.grid.color = grid; ys.grid.color = 'transparent'; ys.ticks.autoSkip = true; ys.ticks.maxTicksLimit = 26; ys.ticks.callback = function (v) { return labels ? labels[v] : v; }; if (multi) { xs.stacked = true; ys.stacked = true; } }
       if (!useCategory && chartType === 'line') xs.type = 'linear';
@@ -2542,7 +2553,12 @@ if _IN_BROWSER:
     }
     if (p.invert_y && options.scales.y) options.scales.y.reverse = true;
     if (p.texts && p.texts.length) options.plugins.subtitle = { display: true, text: p.texts.map(t => t.s).join('  ·  '), color: muted };
-    new Chart(canvas, { type: chartType, data: { labels, datasets }, options });
+    const plugins = [];
+    if (st && chartType !== 'pie') {
+      plugins.push({ id: 'plotBg', beforeDraw: chart => { const { ctx, chartArea: a } = chart; if (!a) return; ctx.save(); ctx.fillStyle = st.bg; ctx.fillRect(a.left, a.top, a.right - a.left, a.bottom - a.top); ctx.restore(); } });
+      if (st.fg) { wrap.style.background = st.bg; options.plugins.legend.labels.color = st.fg; options.plugins.title.color = st.fg; if (options.scales) { options.scales.x.ticks.color = st.fg; options.scales.y.ticks.color = st.fg; } }
+    }
+    new Chart(canvas, { type: chartType, data: { labels, datasets }, options, plugins });
   }
 
   // ───────── 코드 실행기 컴포넌트 ─────────
