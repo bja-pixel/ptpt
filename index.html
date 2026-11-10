@@ -2279,6 +2279,14 @@ if _IN_BROWSER:
       rosterTa,
       h('div', { style: 'display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap' },
         h('button', { class: 'btn primary', type: 'button', onclick: async () => { const entries = parseRoster(rosterTa.value); if (!entries.length) { rmsg.className = 'msg err'; rmsg.textContent = '읽을 수 있는 줄이 없습니다. "이름,학번" 형식인지 확인하세요.'; return; } if (await saveRoster(entries, existing, rmsg)) setTimeout(() => go('teacher'), 600); } }, '명단 저장'),
+        h('button', { class: 'btn small', type: 'button', title: '서버에 남아 있는 학생 기록(submissions)의 이름·학번을 모아 명단 칸에 채웁니다. 확인 후 "명단 저장"을 누르세요.', onclick: () => {
+          const fromSubs = Object.values(subs).filter(d => d && d.sid && d.name && !/^(test|테스트)$/i.test(d.name)).map(d => `${d.name},${d.sid}`);
+          if (!fromSubs.length) { rmsg.className = 'msg err'; rmsg.textContent = '제출 기록에 이름·학번이 있는 학생이 없습니다.'; return; }
+          const cur = parseRoster(rosterTa.value).map(e => `${e.name},${e.sid}`);
+          const merged = Array.from(new Set(cur.concat(fromSubs)));
+          rosterTa.value = merged.join('\n'); rosterTa.dispatchEvent(new Event('input'));
+          rmsg.className = 'msg ok'; rmsg.textContent = `제출 기록에서 ${fromSubs.length}명을 불러왔습니다. 이름·학번을 확인하고 "명단 저장"을 누르세요.`;
+        } }, '제출 기록에서 명단 불러오기'),
         countNote, rmsg),
       roster.length ? h('div', { style: 'margin-top:10px' }, h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px' }, h('b', { style: 'font-size:13px' }, '등록된 명단'), h('button', { class: 'btn small', type: 'button', onclick: () => downloadFile('명단.csv', '﻿이름,학번\n' + roster.map(e => `${e.name},${e.sid}`).join('\n') + '\n', rmsg, card) }, 'CSV 내려받기')), h('div', { style: 'overflow-x:auto;max-height:320px;overflow-y:auto' }, codeTable)) : null);
     card.append(rosterBox);
