@@ -18,21 +18,27 @@ service cloud.firestore {
         && inRoster(sid);
     }
 
-    // 명단: 교수자만 관리. 학생은 자기 학번 문서만 읽기(이름 표시용)
+    // 명단(이름+학번): 교수자만 관리. 학생은 자기 학번 문서만 읽기(이름 표시용)
     match /roster/{sid} {
       allow read: if teacher() || linkedTo(sid);
       allow write: if teacher();
     }
 
-    // 기기(익명 계정) ↔ 학번 연결: 명단의 접속 코드가 맞을 때만 생성·갱신
+    // 기기(익명 계정) ↔ 학번 연결: 명단의 이름과 학번이 일치할 때만 생성·갱신
     match /links/{uid} {
       allow read: if teacher() || (request.auth != null && request.auth.uid == uid);
       allow create, update: if request.auth != null && request.auth.uid == uid
         && request.resource.data.sid is string
-        && request.resource.data.code is string
+        && request.resource.data.name is string
         && inRoster(request.resource.data.sid)
-        && rosterOf(request.resource.data.sid).data.code == request.resource.data.code;
+        && rosterOf(request.resource.data.sid).data.name == request.resource.data.name;
       allow delete: if teacher() || (request.auth != null && request.auth.uid == uid);
+    }
+
+    // 주차 오픈 일정 등 설정: 로그인한 누구나 읽기, 교수자만 쓰기
+    match /settings/{doc} {
+      allow read: if request.auth != null;
+      allow write: if teacher();
     }
 
     // 학생 기록: 본인(연결된 학번)과 교수자만
