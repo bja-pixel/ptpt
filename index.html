@@ -1884,7 +1884,7 @@ if _IN_BROWSER:
   };
   // 큰 실제 데이터는 index.html 옆 data/ 폴더에서 따로 불러옴 (실패하면 내장 12개 지역 표본 사용)
   const EXTERNAL_FILES = ['age.csv', 'gender.csv'];
-  const EXTERNAL_DATA = Promise.all(EXTERNAL_FILES.map(name => fetch('./data/' + name, { cache: 'force-cache' }).then(r => r.ok ? r.text() : Promise.reject(r.status)).then(t => [name, t.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n')]).catch(e => { console.warn('외부 데이터 로드 실패, 표본 사용:', name, e); return null; }))).then(list => Object.fromEntries(list.filter(Boolean)));
+  const EXTERNAL_DATA = Promise.all(EXTERNAL_FILES.map(name => fetch('./data/' + name, { cache: 'force-cache' }).then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status)).then(buf => { const b = new Uint8Array(buf); let t; try { t = new TextDecoder('utf-8', { fatal: true }).decode(b); } catch (e) { t = new TextDecoder('euc-kr').decode(b); } return [name, t.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n')]; }).catch(e => { console.warn('외부 데이터 로드 실패, 표본 사용:', name, e); return null; }))).then(list => Object.fromEntries(list.filter(Boolean)));
   const STORE_KEY = 'pel-lab-v1';
   const $ = (sel, el) => (el || document).querySelector(sel);
   const h = (tag, attrs, ...children) => {
