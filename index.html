@@ -1934,7 +1934,7 @@ if _IN_BROWSER:
     const weeks = Object.assign({}, cloud.schedule);
     COURSE.forEach(m => { weeks[m.id] = Object.assign({ mode: 'open', openAt: null }, weeks[m.id] || {}); });
     weeks[mid] = { mode, openAt: null };
-    try { await cloud.db.doc('settings/schedule').set({ weeks, updatedAt: new Date().toISOString(), by: cloud.user && cloud.user.email || '' }); cloud.schedule = weeks; return true; }
+    try { await withTimeout(cloud.db.doc('settings/schedule').set({ weeks, updatedAt: new Date().toISOString(), by: cloud.user && cloud.user.email || '' }), 20000, '오픈 상태 저장'); cloud.schedule = weeks; return true; }
     catch (e) { console.warn('schedule save failed', e); alert('오픈 상태 저장 실패: ' + (e.message || e.code) + '\nfirestore.rules 에 settings 규칙이 게시되어 있는지 확인하세요.'); return false; }
   }
   function setCloud(kind, text, title) { cloudEl.className = 'pill ' + kind; $('.txt', cloudEl).textContent = text; if (title) cloudEl.title = title; }
@@ -1964,12 +1964,15 @@ if _IN_BROWSER:
     const cre = pr.create.filter(it => ms.primm.cre[it.id] && ms.primm.cre[it.id].pass).length;
     return { done: inv + mod + cre, total: pr.investigate.length + pr.modify.length + pr.create.length, inv, mod, cre };
   }
+  function withTimeout(promise, ms, what) {
+    return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error((what || '서버 요청') + '이(가) ' + Math.round(ms / 1000) + '초 안에 끝나지 않았습니다. 네트워크(firestore.googleapis.com 차단 여부)를 확인하고 새로고침 후 다시 시도하세요.')), ms))]);
+  }
   function cloudFail(e) {
     setCloud('fail', '서버 저장 실패', (e && e.message) || String(e));
     console.warn('cloud write failed', e);
   }
   async function cloudWriteDoc(ref, data) {
-    try { await ref.set(data, { merge: true }); setCloud('ready', '서버에 저장됨', '과제·퀴즈·설명 기록이 서버에 저장됩니다. 어느 기기에서 접속해도 이어집니다.'); return true; }
+    try { await withTimeout(ref.set(data, { merge: true }), 20000, '저장'); setCloud('ready', '서버에 저장됨', '과제·퀴즈·설명 기록이 서버에 저장됩니다. 어느 기기에서 접속해도 이어집니다.'); return true; }
     catch (e) { cloudFail(e); return false; }
   }
   // 자동 저장: 마지막 변경 후 SAVE_DELAY 뒤에 한 번만 서버에 씀(무료 요금제 쓰기 한도 절약). 탭을 숨기거나 닫을 때는 즉시 저장.
@@ -2051,6 +2054,8 @@ if _IN_BROWSER:
     try {
       if (!firebase.apps.length) firebase.initializeApp(CFG.firebase);
       cloud.auth = firebase.auth(); cloud.db = firebase.firestore();
+      // 학교·기관 네트워크(프록시)에서 쓰기가 '저장 중…'에 멈추는 문제 방지: 연결 방식을 자동 감지해 롱폴링으로 전환
+      try { cloud.db.settings({ experimentalAutoDetectLongPolling: true, merge: true }); } catch (e) { console.warn('firestore settings', e); }
     } catch (e) { setCloud('fail', '서버 초기화 실패', e.message); renderSetupNeeded(e.message); return; }
     cloud.auth.onAuthStateChanged(async user => {
       cloud.user = user; cloud.uid = user ? user.uid : null;
@@ -2231,7 +2236,7 @@ if _IN_BROWSER:
         batch.set(cloud.db.doc('roster/' + e.sid), { name: e.name, sid: e.sid, updatedAt: new Date().toISOString() }, { merge: true });
       });
       Object.keys(existing).forEach(sid => { if (!keep.has(sid)) batch.delete(cloud.db.doc('roster/' + sid)); });
-      await batch.commit();
+      await withTimeout(batch.commit(), 20000, '명단 저장');
       msg.className = 'msg ok'; msg.textContent = `명단 ${entries.length}명을 저장했습니다.`;
       return true;
     } catch (e) { msg.className = 'msg err'; msg.textContent = '명단 저장 실패: ' + (e.message || e.code); return false; }
@@ -2864,7 +2869,7 @@ if _IN_BROWSER:
     const saveBtn = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
       msg.className = 'msg muted'; msg.textContent = '저장 중…';
       const weeks = {}; COURSE.forEach(m => { const w = local[m.id]; weeks[m.id] = { mode: w.mode, openAt: w.mode === 'at' ? (w.openAt || null) : null }; });
-      try { await cloud.db.doc('settings/schedule').set({ weeks, updatedAt: new Date().toISOString(), by: cloud.user && cloud.user.email || '' }); cloud.schedule = weeks; renderNav('teacher'); const sm = wrap.parentElement && wrap.parentElement.querySelector('summary'); if (sm) sm.textContent = `주차 오픈 관리 (열림 ${COURSE.filter(m => weekStatus(m, true).open).length}/${COURSE.length}주차)`; msg.className = 'msg ok'; msg.textContent = `저장되었습니다 (${new Date().toLocaleString('ko-KR')}). 학생은 새로고침하면 반영됩니다.`; }
+      try { await withTimeout(cloud.db.doc('settings/schedule').set({ weeks, updatedAt: new Date().toISOString(), by: cloud.user && cloud.user.email || '' }), 20000, '오픈 일정 저장'); cloud.schedule = weeks; renderNav('teacher'); const sm = wrap.parentElement && wrap.parentElement.querySelector('summary'); if (sm) sm.textContent = `주차 오픈 관리 (열림 ${COURSE.filter(m => weekStatus(m, true).open).length}/${COURSE.length}주차)`; msg.className = 'msg ok'; msg.textContent = `저장되었습니다 (${new Date().toLocaleString('ko-KR')}). 학생은 새로고침하면 반영됩니다.`; }
       catch (e) { msg.className = 'msg err'; msg.textContent = '저장 실패: ' + (e.message || e.code) + ' — firestore.rules 에 settings 규칙이 있는지 확인하세요.'; }
     } }, '오픈 일정 저장');
     wrap.append(h('p', { class: 'inline-note' }, '"예약 시각에 열림"은 학생 기기의 시계 기준이며, 그 시각이 지나면 자동으로 열립니다. 잠긴 주차는 학생 목록에 🔒로 표시되고 들어갈 수 없습니다. "매주 자동 예약"은 선택한 주차의 예약 시각(비어 있으면 지금)부터 7일 간격으로 이후 주차를 채웁니다.'), btns, table, h('div', { style: 'margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, saveBtn, msg));
