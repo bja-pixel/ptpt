@@ -2249,12 +2249,13 @@ if _IN_BROWSER:
     if (!cloud.isOwner) { card.append(h('p', { class: 'msg err' }, '교수자 권한이 없습니다.')); return; }
     const loading = h('p', { class: 'inline-note' }, '불러오는 중…'); card.append(loading);
     let subsSnap, rosterSnap;
-    try { [subsSnap, rosterSnap] = await Promise.all([cloud.db.collection('submissions').get(), cloud.db.collection('roster').get()]); }
-    catch (e) { loading.textContent = '불러오지 못했습니다: ' + (e.message || e.code) + ' — Firestore 규칙에 교수자 이메일이 등록되어 있는지 확인하세요.'; return; }
+    try { [subsSnap, rosterSnap] = await withTimeout(Promise.all([cloud.db.collection('submissions').get({ source: 'server' }), cloud.db.collection('roster').get({ source: 'server' })]), 25000, '서버 읽기'); }
+    catch (e) { loading.textContent = '서버에서 불러오지 못했습니다: ' + (e.message || e.code) + ' — permission 오류면 Firestore 규칙의 교수자 이메일을, unavailable/시간 초과면 이 네트워크에서 firestore.googleapis.com 연결이 막혔는지(휴대폰 핫스팟으로 시험) 확인하세요.'; return; }
     loading.remove();
     const existing = {}; rosterSnap.docs.forEach(d => { existing[d.id] = d.data(); });
     const roster = Object.values(existing).sort((a, b) => String(a.sid).localeCompare(String(b.sid)));
     const subs = {}; subsSnap.docs.forEach(d => { subs[d.id] = d.data(); });
+    card.append(h('p', { class: 'inline-note' }, `연결된 Firebase 프로젝트: ${(CFG.firebase && CFG.firebase.projectId) || '?'} · 서버에서 읽은 명단 ${rosterSnap.size}건, 학생 기록 ${subsSnap.size}건`));
 
     // 명단 관리
     const rosterTa = h('textarea', { placeholder: '한 줄에 한 명씩: 이름,학번   (예: 홍길동,20261234)', style: 'width:100%;min-height:110px;font-family:var(--mono);font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg)' });
