@@ -1,7 +1,7 @@
 // Firebase 콘솔 > 프로젝트 설정 > 내 앱(웹) > SDK 설정의 firebaseConfig 값
 window.LAB_CONFIG = {
   firebase: {
-    apiKey: "AIzaSyA482P-3DeGJYwkh4aiOU14CgfuqNUaWFQ",
+    apiKey: "AIzaSyA482P-3DeGJYwkh4aiOUl4CgfuqNUaWFQ",
     authDomain: "ptpt-c3ebf.firebaseapp.com",
     projectId: "ptpt-c3ebf",
     storageBucket: "ptpt-c3ebf.firebasestorage.app",
